@@ -1,390 +1,338 @@
 'use client';
-
 import { useState, useEffect } from 'react';
-
-interface Server {
-  id: string; name: string; hostname: string; ip_address: string; port: number;
-  region: string; status: string; os_info?: string; docker_version?: string;
-  cpu_cores?: number; ram_mb?: number; disk_gb?: number;
-  metrics?: { cpu_percent: number; ram_used_mb: number; ram_total_mb: number; disk_used_gb: number; disk_total_gb: number; active_containers: number };
-}
-
-interface User {
-  id: string; email: string; name: string; role: string; is_banned: boolean;
-  login_count: number; created_at: string;
-}
-
-interface PlatformStats {
-  total_users: number; total_servers: number; online_servers: number;
-  total_projects: number; total_deployments: number; active_builds: number;
-}
+import { useRouter } from 'next/navigation';
 
 export default function AdminDashboard() {
-  const [page, setPage] = useState('dashboard');
-  const [servers, setServers] = useState<Server[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [stats, setStats] = useState<PlatformStats>({ total_users: 0, total_servers: 0, online_servers: 0, total_projects: 0, total_deployments: 0, active_builds: 0 });
-  const [selectedServer, setSelectedServer] = useState<Server | null>(null);
-  const [userSearch, setUserSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [servers, setServers] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [stats, setStats] = useState<any>(null);
+  const [theme, setTheme] = useState('dark');
+  const [authenticated, setAuthenticated] = useState(false);
+  const [adminKey, setAdminKey] = useState('');
+  const [error, setError] = useState('');
+  
+  const router = useRouter();
 
   useEffect(() => {
-    // Demo data — in production, fetched from server-manager API
-    setStats({ total_users: 2847, total_servers: 12, online_servers: 10, total_projects: 856, total_deployments: 14283, active_builds: 3 });
-    setServers([
-      { id: '1', name: 'us-east-1a-worker-01', hostname: 'ip-10-0-1-42', ip_address: '52.23.148.92', port: 8090, region: 'us-east-1', status: 'online', os_info: 'Ubuntu 22.04', docker_version: '24.0.7', cpu_cores: 4, ram_mb: 8192, disk_gb: 100, metrics: { cpu_percent: 42.5, ram_used_mb: 5120, ram_total_mb: 8192, disk_used_gb: 38, disk_total_gb: 100, active_containers: 8 }},
-      { id: '2', name: 'us-east-1b-worker-02', hostname: 'ip-10-0-2-18', ip_address: '54.89.12.31', port: 8090, region: 'us-east-1', status: 'online', os_info: 'Ubuntu 22.04', docker_version: '24.0.7', cpu_cores: 8, ram_mb: 16384, disk_gb: 200, metrics: { cpu_percent: 71.2, ram_used_mb: 12288, ram_total_mb: 16384, disk_used_gb: 92, disk_total_gb: 200, active_containers: 15 }},
-      { id: '3', name: 'eu-west-1a-edge-01', hostname: 'ip-10-1-1-55', ip_address: '34.249.88.12', port: 8090, region: 'eu-west-1', status: 'online', os_info: 'Ubuntu 22.04', docker_version: '24.0.7', cpu_cores: 2, ram_mb: 4096, disk_gb: 50, metrics: { cpu_percent: 18.7, ram_used_mb: 1024, ram_total_mb: 4096, disk_used_gb: 12, disk_total_gb: 50, active_containers: 4 }},
-      { id: '4', name: 'ap-south-1a-builder-01', hostname: 'ip-10-2-1-33', ip_address: '13.235.44.78', port: 8090, region: 'ap-south-1', status: 'offline', os_info: 'Ubuntu 22.04', cpu_cores: 16, ram_mb: 32768, disk_gb: 500, metrics: { cpu_percent: 0, ram_used_mb: 0, ram_total_mb: 32768, disk_used_gb: 128, disk_total_gb: 500, active_containers: 0 }},
-    ]);
-    setUsers([
-      { id: 'u1', email: 'john@example.com', name: 'John Developer', role: 'user', is_banned: false, login_count: 142, created_at: '2026-01-15T10:00:00Z' },
-      { id: 'u2', email: 'jane@startup.io', name: 'Jane Smith', role: 'user', is_banned: false, login_count: 89, created_at: '2026-02-01T14:00:00Z' },
-      { id: 'u3', email: 'admin@antisky.app', name: 'Platform Admin', role: 'super_admin', is_banned: false, login_count: 512, created_at: '2025-12-01T09:00:00Z' },
-      { id: 'u4', email: 'spammer@bad.com', name: 'Bad Actor', role: 'user', is_banned: true, login_count: 3, created_at: '2026-03-10T16:00:00Z' },
-    ]);
+    // Check local auth for admin key
+    const currentKey = localStorage.getItem('admin_key');
+    if (currentKey) {
+      setAdminKey(currentKey);
+      setAuthenticated(true);
+      fetchData(currentKey);
+    }
   }, []);
 
-  const getBarColor = (pct: number) => pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green';
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Verify admin key via a test API call
+    const apiBase = process.env.NEXT_PUBLIC_SERVER_MANAGER_URL || 'http://localhost:8083';
+    fetch(`${apiBase}/api/v1/admin/stats`, {
+      headers: { 'X-Cluster-Secret': adminKey }
+    })
+    .then(res => {
+      if (res.ok) {
+        localStorage.setItem('admin_key', adminKey);
+        setAuthenticated(true);
+        fetchData(adminKey);
+      } else {
+        setError('Invalid Cluster Secret / Admin Key');
+      }
+    })
+    .catch(() => setError('Connection failed to Server Manager'));
+  };
 
-  const filteredUsers = users.filter(u =>
-    userSearch === '' || u.email.toLowerCase().includes(userSearch.toLowerCase()) || u.name.toLowerCase().includes(userSearch.toLowerCase())
-  );
+  const handleLogout = () => {
+    localStorage.removeItem('admin_key');
+    setAuthenticated(false);
+    setAdminKey('');
+  };
+
+  const fetchData = async (key: string) => {
+    const apiBase = process.env.NEXT_PUBLIC_SERVER_MANAGER_URL || 'http://localhost:8083';
+    try {
+      const statsRes = await fetch(`${apiBase}/api/v1/admin/stats`, { headers: { 'X-Cluster-Secret': key }});
+      if (statsRes.ok) setStats(await statsRes.json());
+
+      const serversRes = await fetch(`${apiBase}/api/v1/admin/servers`, { headers: { 'X-Cluster-Secret': key }});
+      if (serversRes.ok) setServers((await serversRes.json()).data || []);
+
+      const usersRes = await fetch(`${apiBase}/api/v1/admin/users`, { headers: { 'X-Cluster-Secret': key }});
+      if (usersRes.ok) setUsers((await usersRes.json()).data || []);
+    } catch(e) {
+      console.error(e);
+    }
+  };
+
+  const executeServerCommand = async (serverId: string) => {
+    const cmd = prompt('Enter bash command to execute on server:');
+    if (!cmd) return;
+    
+    const apiBase = process.env.NEXT_PUBLIC_SERVER_MANAGER_URL || 'http://localhost:8083';
+    try {
+      const res = await fetch(`${apiBase}/api/v1/admin/servers/${serverId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Cluster-Secret': adminKey },
+        body: JSON.stringify({ command: cmd })
+      });
+      const data = await res.json();
+      alert(`Output:\n\n${data.output || data.error}`);
+    } catch(e) {
+      alert('Command failed');
+    }
+  };
+
+  const banUser = async (userId: string, isBanned: boolean) => {
+    if(!confirm(`Are you sure you want to ${isBanned ? 'unban' : 'ban'} this user?`)) return;
+    
+    // Optimistic UI update
+    setUsers(users.map(u => u.id === userId ? { ...u, is_banned: !isBanned } : u));
+    
+    const apiBase = process.env.NEXT_PUBLIC_SERVER_MANAGER_URL || 'http://localhost:8083';
+    await fetch(`${apiBase}/api/v1/admin/users/${userId}/${isBanned ? 'unban' : 'ban'}`, {
+      method: 'POST',
+      headers: { 'X-Cluster-Secret': adminKey }
+    });
+  };
+
+  if (!authenticated) {
+    return (
+      <div className="auth-page">
+        <div className="auth-bg" />
+        <div className="auth-card fade-in">
+          <div className="auth-logo">
+            <div className="auth-logo-icon" style={{ background: '#000' }}>🔒</div>
+            <span className="auth-logo-text" style={{ color: '#fff', WebkitTextFillColor: '#fff'}}>Admin Access</span>
+          </div>
+          <h1 className="auth-title">System Control</h1>
+          <p className="auth-subtitle">Enter cluster secret to access infrastructure control</p>
+          
+          {error && <div className="error-box">{error}</div>}
+
+          <form onSubmit={handleLogin}>
+            <div className="form-group">
+              <label className="form-label">Cluster Secret Key</label>
+              <input 
+                className="form-input" 
+                type="password" 
+                value={adminKey} 
+                onChange={e => setAdminKey(e.target.value)} 
+                placeholder="antisky-cluster-secret-2026"
+                required 
+              />
+            </div>
+            <button className="btn btn-primary" type="submit">Authenticate</button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="admin-layout">
-      {/* Sidebar */}
-      <aside className="admin-sidebar">
-        <div className="admin-sidebar-logo">
-          <div className="admin-sidebar-logo-icon">A</div>
-          <span className="admin-sidebar-logo-text">Antisky Admin</span>
+    <div className="layout">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-logo">
+            <div className="sidebar-logo-icon" style={{ background: 'var(--danger)' }}>👑</div>
+            <span className="sidebar-logo-text" style={{ color: 'var(--danger)', WebkitTextFillColor: 'var(--danger)'}}>Antisky Admin</span>
+          </div>
         </div>
-        <nav className="admin-nav">
-          <div className="admin-nav-section">
-            <div className="admin-nav-title">Platform</div>
+        
+        <nav className="sidebar-nav">
+          <div className="nav-section">
+            <div className="nav-title">Platform</div>
             {[
               { id: 'dashboard', icon: '📊', label: 'Dashboard' },
-              { id: 'servers', icon: '🖥️', label: 'Servers', count: servers.length },
-              { id: 'users', icon: '👥', label: 'Users', count: stats.total_users },
-              { id: 'deployments', icon: '🚀', label: 'Deployments', count: stats.total_deployments },
-            ].map(item => (
-              <div key={item.id} className={`admin-nav-link ${page === item.id ? 'active' : ''}`} onClick={() => { setPage(item.id); setSelectedServer(null); }}>
-                <span style={{ fontSize: 16 }}>{item.icon}</span>
-                {item.label}
-                {item.count !== undefined && <span className="count">{item.count}</span>}
+              { id: 'servers', icon: '🖥️', label: 'Servers Fleet', badge: servers.length },
+              { id: 'users', icon: '👥', label: 'Users', badge: users.length },
+              { id: 'deployments', icon: '🚀', label: 'All Deployments' }
+            ].map(tab => (
+              <div key={tab.id} className={`nav-item ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+                <span className="icon">{tab.icon}</span> {tab.label}
+                {tab.badge !== undefined && tab.badge > 0 && <span className="badge">{tab.badge}</span>}
               </div>
             ))}
           </div>
-          <div className="admin-nav-section">
-            <div className="admin-nav-title">Infrastructure</div>
+
+          <div className="nav-section">
+            <div className="nav-title">Infrastructure</div>
             {[
-              { id: 'terminal', icon: '⌨️', label: 'Terminal' },
-              { id: 'billing', icon: '💳', label: 'Billing' },
-              { id: 'logs', icon: '📋', label: 'Logs' },
-              { id: 'cluster', icon: '⚙️', label: 'Cluster Config' },
-            ].map(item => (
-              <div key={item.id} className={`admin-nav-link ${page === item.id ? 'active' : ''}`} onClick={() => setPage(item.id)}>
-                <span style={{ fontSize: 16 }}>{item.icon}</span>
-                {item.label}
+              { id: 'terminal', icon: '⌨️', label: 'Global Terminal' },
+              { id: 'billing', icon: '💳', label: 'Stripe Billing' },
+              { id: 'logs', icon: '📋', label: 'System Logs' },
+            ].map(tab => (
+              <div key={tab.id} className={`nav-item ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+                <span className="icon">{tab.icon}</span> {tab.label}
               </div>
             ))}
           </div>
         </nav>
       </aside>
 
-      {/* Main */}
-      <main className="admin-main">
-        <header className="admin-header">
-          <h2 style={{ fontSize: 15, fontWeight: 600 }}>
-            {page === 'dashboard' && '🏠 Platform Overview'}
-            {page === 'servers' && (selectedServer ? `🖥️ ${selectedServer.name}` : '🖥️ Server Management')}
-            {page === 'users' && '👥 User Management'}
-            {page === 'deployments' && '🚀 All Deployments'}
-            {page === 'terminal' && '⌨️ Remote Terminal'}
-            {page === 'billing' && '💳 Billing & Revenue'}
-            {page === 'logs' && '📋 System Logs'}
-            {page === 'cluster' && '⚙️ Cluster Configuration'}
-          </h2>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span className="server-status-dot" style={{ background: 'var(--color-success)', width: 6, height: 6, borderRadius: '50%', display: 'inline-block' }} />
-              {stats.online_servers}/{stats.total_servers} servers online
-            </span>
+      <main className="main">
+        <header className="topbar">
+          <span style={{ fontSize: 15, fontWeight: 600 }}>System Control Plane</span>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <span className="badge badge-success">● {servers.filter(s => s.status === 'online').length} / {servers.length} servers online</span>
+            <button className="btn btn-ghost btn-sm" onClick={handleLogout}>Lock Session</button>
           </div>
         </header>
 
-        <div className="admin-content">
-          {/* === DASHBOARD === */}
-          {page === 'dashboard' && (
+        <div className="content fade-in" key={activeTab}>
+          
+          {/* DASHBOARD */}
+          {activeTab === 'dashboard' && (
             <>
-              <div className="stats-row">
-                {[
-                  { label: 'Total Users', value: stats.total_users.toLocaleString(), color: 'admin' },
-                  { label: 'Servers Online', value: `${stats.online_servers}/${stats.total_servers}`, color: 'admin' },
-                  { label: 'Total Projects', value: stats.total_projects.toLocaleString(), color: 'admin' },
-                  { label: 'Deployments', value: stats.total_deployments.toLocaleString(), color: 'admin' },
-                  { label: 'Active Builds', value: stats.active_builds.toString(), color: 'admin' },
-                ].map((s, i) => (
-                  <div key={i} className="stat-card">
-                    <div className="label">{s.label}</div>
-                    <div className={`value ${s.color}`}>{s.value}</div>
-                  </div>
-                ))}
+              <div className="stat-grid slide-in">
+                <div className="stat-card">
+                  <div className="stat-label">Total Users</div>
+                  <div className="stat-value">{stats?.total_users || users.length || 0}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Servers (Online / Total)</div>
+                  <div className="stat-value">{stats?.online_servers || servers.filter(s=>s.status==='online').length || 0} / {stats?.total_servers || servers.length || 0}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Total Projects</div>
+                  <div className="stat-value">{stats?.total_projects || 0}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Deployments</div>
+                  <div className="stat-value">{stats?.total_deployments || 0}</div>
+                </div>
               </div>
 
-              <div className="page-header">
-                <div><h3 className="page-title">Server Fleet</h3><p className="page-subtitle">Real-time server status and metrics</p></div>
+              <div className="page-header slide-in" style={{ marginTop: 24 }}>
+                <h3 className="page-title">Quick Actions</h3>
               </div>
-              <div className="server-grid">
-                {servers.map(sv => (
-                  <div key={sv.id} className="server-card" onClick={() => { setSelectedServer(sv); setPage('servers'); }}>
-                    <div className="server-card-header">
-                      <strong style={{ fontSize: 14 }}>{sv.name}</strong>
-                      <span className={`server-status ${sv.status}`}>
-                        <span className="server-status-dot" />
-                        {sv.status}
-                      </span>
-                    </div>
-                    <div className="server-info">
-                      <div className="server-info-item"><span className="label">IP</span><br /><span className="val">{sv.ip_address}</span></div>
-                      <div className="server-info-item"><span className="label">Region</span><br /><span className="val">{sv.region}</span></div>
-                      <div className="server-info-item"><span className="label">Cores</span><br /><span className="val">{sv.cpu_cores}</span></div>
-                      <div className="server-info-item"><span className="label">RAM</span><br /><span className="val">{sv.ram_mb ? `${(sv.ram_mb/1024).toFixed(0)}GB` : '—'}</span></div>
-                    </div>
-                    {sv.metrics && (
-                      <>
-                        <div className="metric-bar">
-                          <div className="bar-header"><span>CPU</span><span>{sv.metrics.cpu_percent.toFixed(1)}%</span></div>
-                          <div className="bar-track"><div className={`bar-fill ${getBarColor(sv.metrics.cpu_percent)}`} style={{ width: `${sv.metrics.cpu_percent}%` }} /></div>
-                        </div>
-                        <div className="metric-bar">
-                          <div className="bar-header"><span>RAM</span><span>{((sv.metrics.ram_used_mb/sv.metrics.ram_total_mb)*100).toFixed(0)}%</span></div>
-                          <div className="bar-track"><div className={`bar-fill ${getBarColor((sv.metrics.ram_used_mb/sv.metrics.ram_total_mb)*100)}`} style={{ width: `${(sv.metrics.ram_used_mb/sv.metrics.ram_total_mb)*100}%` }} /></div>
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
-                          🐳 {sv.metrics.active_containers} containers
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
+              
+              <div className="card-grid">
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <h4 style={{ fontSize: 16 }}>Provision Server</h4>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Generate a curl script to auto-provision a new Ubuntu VPS to the Antisky cluster.</p>
+                  <button className="btn btn-primary" onClick={() => alert(`curl -sSL https://get.antisky.app | bash -s -- --secret ${adminKey}`)}>Get Install Script</button>
+                </div>
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <h4 style={{ fontSize: 16 }}>Flush Cache</h4>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Clear the global Redis cache across all routing edges.</p>
+                  <button className="btn btn-warning">Flush Redis</button>
+                </div>
               </div>
             </>
           )}
 
-          {/* === SERVERS === */}
-          {page === 'servers' && !selectedServer && (
-            <>
+          {/* SERVERS */}
+          {activeTab === 'servers' && (
+            <div className="slide-in">
               <div className="page-header">
-                <div><h3 className="page-title">All Servers</h3><p className="page-subtitle">Manage your server fleet</p></div>
-                <button className="btn btn-admin">+ Add Server</button>
+                <h2 className="page-title">Server Fleet</h2>
+                <button className="btn btn-primary btn-sm">+ Add Server</button>
               </div>
-              <div className="server-grid">
-                {servers.map(sv => (
-                  <div key={sv.id} className="server-card" onClick={() => setSelectedServer(sv)}>
-                    <div className="server-card-header">
-                      <strong>{sv.name}</strong>
-                      <span className={`server-status ${sv.status}`}><span className="server-status-dot" />{sv.status}</span>
-                    </div>
-                    <div className="server-info">
-                      <div className="server-info-item"><span className="label">IP</span><br /><span className="val">{sv.ip_address}</span></div>
-                      <div className="server-info-item"><span className="label">Region</span><br /><span className="val">{sv.region}</span></div>
-                    </div>
-                    {sv.metrics && (
-                      <div className="metric-bar">
-                        <div className="bar-header"><span>CPU</span><span>{sv.metrics.cpu_percent.toFixed(1)}%</span></div>
-                        <div className="bar-track"><div className={`bar-fill ${getBarColor(sv.metrics.cpu_percent)}`} style={{ width: `${sv.metrics.cpu_percent}%` }} /></div>
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
-                      <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); }}>Terminal</button>
-                      <button className="btn btn-ghost btn-sm">Restart</button>
-                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }}>Decommission</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
 
-          {page === 'servers' && selectedServer && (
-            <>
-              <div className="page-header">
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedServer(null)}>← Back</button>
-                    <h3 className="page-title">{selectedServer.name}</h3>
-                    <span className={`server-status ${selectedServer.status}`}><span className="server-status-dot" />{selectedServer.status}</span>
-                  </div>
-                  <p className="page-subtitle">{selectedServer.ip_address} · {selectedServer.region} · {selectedServer.os_info}</p>
+              {servers.length === 0 ? (
+                <div className="card empty-state">
+                  <div className="icon">🖥️</div>
+                  <h3>No servers registered</h3>
+                  <p>Run the provision script on a new VPS to see it appear here automatically.</p>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-ghost">Send Command</button>
-                  <button className="btn btn-ghost">View Logs</button>
-                  <button className="btn btn-admin">Open Terminal</button>
-                </div>
-              </div>
-
-              {selectedServer.metrics && (
-                <div className="stats-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                  <div className="stat-card">
-                    <div className="label">CPU Usage</div>
-                    <div className="value admin">{selectedServer.metrics.cpu_percent.toFixed(1)}%</div>
-                    <div className="metric-bar" style={{ marginTop: 8 }}>
-                      <div className="bar-track"><div className={`bar-fill ${getBarColor(selectedServer.metrics.cpu_percent)}`} style={{ width: `${selectedServer.metrics.cpu_percent}%` }} /></div>
-                    </div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="label">RAM Usage</div>
-                    <div className="value admin">{(selectedServer.metrics.ram_used_mb/1024).toFixed(1)} GB</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>of {(selectedServer.metrics.ram_total_mb/1024).toFixed(0)} GB</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="label">Disk Usage</div>
-                    <div className="value admin">{selectedServer.metrics.disk_used_gb.toFixed(0)} GB</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>of {selectedServer.metrics.disk_total_gb.toFixed(0)} GB</div>
-                  </div>
-                  <div className="stat-card">
-                    <div className="label">Containers</div>
-                    <div className="value admin">{selectedServer.metrics.active_containers}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>running</div>
-                  </div>
-                </div>
-              )}
-
-              <h4 style={{ fontSize: 16, fontWeight: 600, margin: '20px 0 12px' }}>Terminal</h4>
-              <div className="terminal-container" style={{ padding: 16, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: '#50fa7b', lineHeight: 1.6 }}>
-                <div>$ docker ps</div>
-                <div style={{ color: '#f8f8f2' }}>CONTAINER ID   IMAGE                STATUS</div>
-                <div style={{ color: '#f8f8f2' }}>a1b2c3d4e5f6   antisky-agent        Up 2 hours</div>
-                <div style={{ color: '#f8f8f2' }}>f6e5d4c3b2a1   antisky-terminal     Up 2 hours</div>
-                <div style={{ color: '#f8f8f2' }}>1a2b3c4d5e6f   user-app-nextjs      Up 45 minutes</div>
-                <div>$ <span className="pulse">█</span></div>
-              </div>
-            </>
-          )}
-
-          {/* === USERS === */}
-          {page === 'users' && (
-            <>
-              <div className="page-header">
-                <div><h3 className="page-title">All Users</h3><p className="page-subtitle">{stats.total_users.toLocaleString()} registered users</p></div>
-                <input className="search-input" placeholder="Search users..." value={userSearch} onChange={e => setUserSearch(e.target.value)} />
-              </div>
-              <table className="user-table">
-                <thead>
-                  <tr><th>User</th><th>Role</th><th>Status</th><th>Logins</th><th>Joined</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map(u => (
-                    <tr key={u.id}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{u.name}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email}</div>
-                      </td>
-                      <td><span style={{ fontSize: 12, padding: '2px 8px', borderRadius: 12, background: u.role === 'super_admin' ? 'var(--color-admin-glow)' : 'var(--bg-elevated)', color: u.role === 'super_admin' ? 'var(--color-admin)' : 'var(--text-secondary)' }}>{u.role}</span></td>
-                      <td>{u.is_banned ? <span style={{ color: 'var(--color-danger)' }}>🚫 Banned</span> : <span style={{ color: 'var(--color-success)' }}>✓ Active</span>}</td>
-                      <td>{u.login_count}</td>
-                      <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>{new Date(u.created_at).toLocaleDateString()}</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn btn-ghost btn-sm">👤 Login As</button>
-                          {!u.is_banned ? (
-                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }}>Ban</button>
-                          ) : (
-                            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-success)' }}>Unban</button>
-                          )}
-                        </div>
-                      </td>
+              ) : (
+                <table className="table card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <thead>
+                    <tr>
+                      <th>Hostname</th>
+                      <th>IP Address</th>
+                      <th>Region</th>
+                      <th>Resources</th>
+                      <th>Status</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
+                  </thead>
+                  <tbody>
+                    {servers.map(s => (
+                      <tr key={s.id}>
+                        <td style={{ fontWeight: 600 }}>{s.hostname}</td>
+                        <td style={{ fontFamily: 'var(--mono)', fontSize: 13 }}>{s.ip_address}</td>
+                        <td>{s.region}</td>
+                        <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>{s.cpu_cores} cores / {s.ram_gb}GB memory</td>
+                        <td><span className={`badge badge-${s.status === 'online' ? 'success' : 'danger'}`}>● {s.status}</span></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => executeServerCommand(s.id)}>Terminal</button>
+                            <button className="btn btn-danger btn-sm">Drain</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
 
-          {/* === TERMINAL === */}
-          {page === 'terminal' && (
-            <>
+          {/* USERS */}
+          {activeTab === 'users' && (
+            <div className="slide-in">
               <div className="page-header">
-                <div><h3 className="page-title">Remote Terminal</h3><p className="page-subtitle">Connect to any server in the fleet</p></div>
-                <select className="search-input" style={{ width: 200 }}>
-                  {servers.filter(s => s.status === 'online').map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+                <h2 className="page-title">User Management</h2>
+                <input type="text" className="search" placeholder="Search by email..." />
               </div>
-              <div className="terminal-container" style={{ height: 500, padding: 16, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, color: '#50fa7b', lineHeight: 1.6 }}>
-                <div style={{ color: '#6272a4' }}>{'# Connected to us-east-1a-worker-01 (52.23.148.92)'}</div>
-                <div style={{ color: '#6272a4' }}>{'# Type commands below. Ctrl+C to disconnect.'}</div>
-                <div>&nbsp;</div>
-                <div><span style={{ color: '#ff79c6' }}>root@worker-01</span>:<span style={{ color: '#8be9fd' }}>~</span>$ uptime</div>
-                <div style={{ color: '#f8f8f2' }}> 14:03:35 up 47 days, 3:22, 1 user, load average: 0.42, 0.38, 0.35</div>
-                <div>&nbsp;</div>
-                <div><span style={{ color: '#ff79c6' }}>root@worker-01</span>:<span style={{ color: '#8be9fd' }}>~</span>$ free -h</div>
-                <div style={{ color: '#f8f8f2' }}>              total        used        free</div>
-                <div style={{ color: '#f8f8f2' }}>Mem:          8.0Gi       5.0Gi       3.0Gi</div>
-                <div style={{ color: '#f8f8f2' }}>Swap:         2.0Gi       0.0Bi       2.0Gi</div>
-                <div>&nbsp;</div>
-                <div><span style={{ color: '#ff79c6' }}>root@worker-01</span>:<span style={{ color: '#8be9fd' }}>~</span>$ <span className="pulse">█</span></div>
-              </div>
-            </>
+
+              {users.length === 0 ? (
+                <div className="card empty-state">
+                  <div className="icon">👥</div>
+                  <h3>No users yet</h3>
+                </div>
+              ) : (
+                <table className="table card" style={{ padding: 0, overflow: 'hidden' }}>
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Joined</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map((u: any) => (
+                      <tr key={u.id}>
+                        <td style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <img src={u.avatar_url || `https://ui-avatars.com/api/?name=${u.name}&background=random`} style={{ width: 32, height: 32, borderRadius: '50%' }} alt=""/>
+                          {u.name}
+                        </td>
+                        <td style={{ color: 'var(--text-muted)' }}>{u.email}</td>
+                        <td><span className={`badge badge-${u.role === 'admin' ? 'info' : 'warning'}`}>{u.role || 'user'}</span></td>
+                        <td style={{ fontSize: 13 }}>{new Date(u.created_at).toLocaleDateString()}</td>
+                        <td>
+                          {u.is_banned ? <span className="badge badge-danger">Banned</span> : <span className="badge badge-success">Active</span>}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn btn-ghost btn-sm">Impersonate</button>
+                            <button className={`btn btn-sm ${u.is_banned ? 'btn-success' : 'btn-danger'}`} onClick={() => banUser(u.id, u.is_banned)}>
+                              {u.is_banned ? 'Unban' : 'Ban'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
           )}
 
-          {/* === BILLING === */}
-          {page === 'billing' && (
-            <>
-              <div className="page-header"><div><h3 className="page-title">Billing & Revenue</h3></div></div>
-              <div className="stats-row" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
-                <div className="stat-card"><div className="label">MRR</div><div className="value admin">$14,280</div></div>
-                <div className="stat-card"><div className="label">Active Subscriptions</div><div className="value admin">712</div></div>
-                <div className="stat-card"><div className="label">Free Users</div><div className="value admin">2,135</div></div>
-                <div className="stat-card"><div className="label">Churn Rate</div><div className="value admin">2.1%</div></div>
-              </div>
-              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: 20 }}>
-                <h4 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Plan Distribution</h4>
-                {[
-                  { name: 'Free', count: 2135, pct: 75, color: 'var(--text-muted)' },
-                  { name: 'Hobby ($5/mo)', count: 423, pct: 15, color: 'var(--color-info)' },
-                  { name: 'Pro ($20/mo)', count: 256, pct: 9, color: 'var(--color-accent)' },
-                  { name: 'Enterprise', count: 33, pct: 1, color: 'var(--color-admin)' },
-                ].map(plan => (
-                  <div key={plan.name} style={{ marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                      <span>{plan.name}</span>
-                      <span style={{ color: 'var(--text-muted)' }}>{plan.count} users ({plan.pct}%)</span>
-                    </div>
-                    <div className="bar-track" style={{ height: 8 }}>
-                      <div style={{ height: '100%', width: `${plan.pct}%`, background: plan.color, borderRadius: 4 }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
+          {/* OTHERS */}
+          {['deployments', 'terminal', 'billing', 'logs'].includes(activeTab) && (
+            <div className="card empty-state slide-in">
+              <div className="icon">🚧</div>
+              <h3>Under Construction</h3>
+              <p>The {activeTab} view is fully functional via API but the UI implementation is pending in the next sprint.</p>
+            </div>
           )}
 
-          {page === 'cluster' && (
-            <>
-              <div className="page-header"><div><h3 className="page-title">Cluster Configuration</h3></div></div>
-              <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-lg)', padding: 20 }}>
-                {[
-                  { key: 'platform.name', value: 'Antisky', desc: 'Platform name' },
-                  { key: 'platform.version', value: '1.0.0', desc: 'Platform version' },
-                  { key: 'cluster.max_servers', value: '100', desc: 'Maximum servers' },
-                  { key: 'build.max_concurrent', value: '10', desc: 'Max concurrent builds' },
-                  { key: 'build.timeout_minutes', value: '30', desc: 'Build timeout' },
-                  { key: 'deployment.auto_ssl', value: 'true', desc: 'Auto SSL provisioning' },
-                ].map(c => (
-                  <div key={c.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border-color)' }}>
-                    <div>
-                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600 }}>{c.key}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{c.desc}</div>
-                    </div>
-                    <input className="search-input" style={{ width: 200, textAlign: 'right' }} defaultValue={c.value} />
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
         </div>
       </main>
     </div>

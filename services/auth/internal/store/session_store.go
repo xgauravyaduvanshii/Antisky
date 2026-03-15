@@ -60,9 +60,11 @@ func (s *SessionStore) Create(ctx context.Context, userID uuid.UUID, ip, userAge
 		return nil, "", err
 	}
 
-	// Cache session in Redis for fast lookups
-	cacheKey := fmt.Sprintf("session:%s", session.ID)
-	s.rdb.Set(ctx, cacheKey, session.UserID.String(), expiry)
+	// Cache session in Redis for fast lookups (if available)
+	if s.rdb != nil {
+		cacheKey := fmt.Sprintf("session:%s", session.ID)
+		s.rdb.Set(ctx, cacheKey, session.UserID.String(), expiry)
+	}
 
 	return session, refreshToken, nil
 }
@@ -102,9 +104,11 @@ func (s *SessionStore) Delete(ctx context.Context, sessionID uuid.UUID) error {
 		return err
 	}
 
-	// Remove from Redis cache
-	cacheKey := fmt.Sprintf("session:%s", sessionID)
-	s.rdb.Del(ctx, cacheKey)
+	// Remove from Redis cache (if available)
+	if s.rdb != nil {
+		cacheKey := fmt.Sprintf("session:%s", sessionID)
+		s.rdb.Del(ctx, cacheKey)
+	}
 
 	return nil
 }
@@ -133,10 +137,12 @@ func (s *SessionStore) DeleteAllForUser(ctx context.Context, userID uuid.UUID) e
 		return err
 	}
 
-	// Clean Redis cache
-	for _, id := range sessionIDs {
-		cacheKey := fmt.Sprintf("session:%s", id)
-		s.rdb.Del(ctx, cacheKey)
+	// Clean Redis cache (if available)
+	if s.rdb != nil {
+		for _, id := range sessionIDs {
+			cacheKey := fmt.Sprintf("session:%s", id)
+			s.rdb.Del(ctx, cacheKey)
+		}
 	}
 
 	return nil
