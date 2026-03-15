@@ -21,6 +21,21 @@ services:
       retries: 5
 
   # ===================================
+  # Redis Cache
+  # ===================================
+  redis:
+    image: redis:7-alpine
+    container_name: antisky-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ===================================
   # Auth Service (Go) — JWT, OAuth, API Keys
   # ===================================
   auth:
@@ -33,7 +48,7 @@ services:
     environment:
       PORT: "8081"
       DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
-      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      REDIS_URL: redis://redis:6379
       JWT_SECRET: antisky-jwt-secret-k8s-prod-2026-change-this
       JWT_EXPIRY: 15m
       REFRESH_TOKEN_EXPIRY: 168h
@@ -49,6 +64,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   # ===================================
   # Control Plane API (Go) — Projects, Deployments, Orgs
@@ -63,12 +80,14 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
-      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      REDIS_URL: redis://redis:6379
       AUTH_SERVICE_URL: http://auth:8081
       GITHUB_WEBHOOK_SECRET: dev-webhook-secret
       ENCRYPTION_KEY: antisky-aes256-encryption-key32
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ===================================
@@ -81,10 +100,12 @@ services:
     container_name: antisky-build-orchestrator
     environment:
       DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
-      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      REDIS_URL: redis://redis:6379
       CONTROL_PLANE_URL: http://control-plane:8080
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ===================================
@@ -100,10 +121,12 @@ services:
     environment:
       SERVER_MANAGER_PORT: "8083"
       DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
-      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      REDIS_URL: redis://redis:6379
       CLUSTER_SECRET: antisky-cluster-secret-2026
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # ===================================
@@ -119,8 +142,8 @@ services:
     environment:
       BILLING_PORT: "8087"
       DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
       PLATFORM_URL: http://localhost:3000
     depends_on:
       postgres:
@@ -154,11 +177,26 @@ services:
     ports:
       - "3001:3001"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8083
+      NEXT_PUBLIC_SERVER_MANAGER_URL: http://localhost:8083
+      NEXT_PUBLIC_CONTROL_PLANE_URL: http://localhost:8082
       NEXT_PUBLIC_AUTH_URL: http://localhost:8081
     depends_on:
       - server-manager
       - auth
 
+  # ===================================
+  # Documentation Site (Next.js)
+  # ===================================
+  docs:
+    build:
+      context: .
+      dockerfile: ./apps/docs/Dockerfile
+    container_name: antisky-docs
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: production
+
 volumes:
   postgres_data:
+  redis_data:

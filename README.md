@@ -1,4 +1,4 @@
-# 🌌 Antisky
+# 🌌 Antisky Cloud Platform
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Antisky-6366f1?style=for-the-badge&logo=cloud&logoColor=white" />
@@ -10,118 +10,78 @@
 </p>
 
 <p align="center">
-  <strong>A world-class, distributed hosting platform</strong><br/>
-  Deploy websites, APIs, and full-stack applications at scale — like Vercel meets Heroku, built for unlimited server fleets.
+  <strong>The Ultimate World-Class Distributed Hosting Platform</strong><br/>
+  Deploy websites, APIs, and full-stack applications effortlessly at infinite scale. <br/>Think Vercel meets Heroku, built for unlimited bare-metal server fleets.
 </p>
 
 ---
 
-## ✨ Features
+## ✨ Unmatched Capabilities
 
 | Feature | Description |
 |---------|-------------|
-| 🚀 **Instant Deployments** | Push to Git → automatic builds & deploys |
-| 🌍 **Multi-Language** | Node.js, Go, Python, PHP, Ruby, Rust, Java, .NET, Static |
-| 🖥️ **Distributed Fleet** | Unlimited server scaling across regions |
-| 🔐 **Enterprise Auth** | JWT, OAuth (GitHub/Google/GitLab/Bitbucket), API Keys |
-| 📊 **Admin Panel** | Full platform control — users, servers, billing, terminal |
-| ⌨️ **Web Terminal** | SSH-in-browser to any server node |
-| 💳 **Stripe Billing** | Subscriptions, usage metering, webhooks |
-| 🔧 **Builder System** | One-command server provisioning |
-| 🧩 **VS Code Extension** | Deploy & manage from your editor |
+| 🚀 **Instant Git Deploys** | Push code. We handle the containerization, build, and global distribution. |
+| 🌍 **Multi-Framework** | Next.js, Node, Go, Python, PHP, Ruby, Rust, Java, Static rendering out-of-the-box. |
+| 🖥️ **Distributed Fleet** | Attach unlimited physical servers across global regions. Scale horizontally forever. |
+| 🔐 **Enterprise Auth** | Built-in JWT, OAuth (Google/GitHub/GitLab), granular API Keys, and 2FA. |
+| 📊 **Command Center** | State-of-the-art Admin Panel for complete platform oversight and user management. |
+| ⌨️ **Global Terminal** | Web-based SSH proxy. Access any fleet node securely directly from your browser. |
+| 💳 **Razorpay Billing** | Fully automated subscriptions, metered usage tracking, and automated webhooks. |
+| 🔧 **Builder System** | Zero-config build orchestra that natively detects and compiles source code. |
 
 ---
 
-## 🏗️ Architecture
+## 📚 Comprehensive Documentation
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      FRONTENDS                          │
-│  Dashboard (:3000)  │  Admin Panel (:3001)  │  CLI      │
-└─────────┬───────────┴───────────┬───────────┴───────────┘
-          │                       │
-┌─────────▼───────────────────────▼───────────────────────┐
-│                   CORE SERVICES (Go)                    │
-│  Auth (:8081)  │  Control Plane (:8082)  │  Billing     │
-│  Server Manager (:8083)  │  Build Orchestrator          │
-└─────────┬───────────────────────┬───────────────────────┘
-          │                       │
-┌─────────▼───────────┐ ┌────────▼────────────────────────┐
-│  PostgreSQL (22 tbl) │ │     Server Fleet                │
-│  Redis Cloud         │ │  Agent + Terminal per node      │
-└──────────────────────┘ └─────────────────────────────────┘
-```
+Dive deep into the platform mechanics with our detailed technical guides:
+
+- 🏛 **[Architecture Overview](docs/architecture.md)** — High-level system design and component interaction.
+- ⚙️ **[Backend Microservices](docs/services.md)** — In-depth look at Auth, Control Plane, Builder, Server Manager, and Billing APIs.
+- 💻 **[Frontend Applications](docs/apps.md)** — Breakdown of the User Dashboard and Admin Panel UI/UX logic.
+- 🚀 **[Deployment Guide](docs/deployment.md)** — How to host Antisky locally or on production AWS using Terraform.
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Local Development)
 
 ```bash
-# Clone
+# 1. Clone the platform
 git clone https://github.com/xgauravyaduvanshii/Antisky.git
 cd Antisky
 
-# Start all services (requires Docker)
+# 2. Configure Environment
+cp .env.example .env
+# Important: Open .env and add your Razorpay Live/Test Keys
+
+# 3. Spin up the distributed cluster (Requires Docker)
 docker compose up --build -d
-
-# Access
-# Dashboard:  http://localhost:3000
-# Admin:      http://localhost:3001
-# Auth API:   http://localhost:8081
-# API:        http://localhost:8082
 ```
+
+### 📍 Access Points
+
+- 🖥️ **User Dashboard:** `http://localhost:3000`
+- 🛡️ **Admin Panel:** `http://localhost:3001`
+- 🔑 **Auth API:** `http://localhost:8081`
+- 🌐 **Control API:** `http://localhost:8082`
 
 ---
 
-## 📁 Project Structure
+## 🛠️ State-of-the-Art Tech Stack
 
-```
-antisky/
-├── apps/
-│   ├── dashboard/      # User dashboard (Next.js 15)
-│   └── admin/          # Admin panel (Next.js 15)
-├── services/
-│   ├── auth/           # Authentication (Go) — JWT, OAuth, Sessions
-│   ├── control-plane/  # Projects, Deployments, Orgs (Go)
-│   ├── build-orchestrator/  # Build queue & language detection (Go)
-│   ├── server-manager/     # Fleet management & admin API (Go)
-│   └── billing/        # Stripe subscriptions & usage (Go)
-├── builder/            # Server node provisioning package
-│   ├── install.sh      # One-command server setup
-│   ├── start-server.sh # Bootstrap & auto-register
-│   └── services/       # Agent + Terminal proxy
-├── tools/
-│   ├── cli/            # Antisky CLI (Go)
-│   └── vscode-extension/  # VS Code extension
-├── infra/              # Terraform + Docker templates
-└── docker-compose.yml  # Full local development stack
-```
-
----
-
-## 🛠️ Tech Stack
-
-- **Backend:** Go 1.22 (Chi router, pgx, JWT)
+- **Backend:** Go 1.22 (Chi router, pgx async drivers, stateless JWT)
 - **Frontend:** Next.js 15, React 19, TypeScript
-- **Database:** PostgreSQL 16 (22 tables)
-- **Cache:** Redis Cloud
-- **Payments:** Stripe
-- **Container:** Docker, Docker Compose
-- **IaC:** Terraform (AWS)
-- **Monitoring:** Prometheus + Grafana (planned)
+- **Styling:** Highly custom Vanilla CSS Engine (Glassmorphism, Dark/Light/Ocean Themes)
+- **Database:** PostgreSQL 16 (22 normalized tables)
+- **Cache:** Redis Cloud (Real-time Pub/Sub)
+- **Payments:** Razorpay API Integration
+- **Infrastructure:** Docker, Docker Compose, AWS Terraform
 
 ---
 
-## 📄 License
+## 📄 License & Open Source
 
-[MIT License](LICENSE) — free for personal and commercial use.
-
----
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Licensed under the [MIT License](LICENSE). Free for both personal and enterprise commercial use.
 
 ---
 
-<p align="center">Built with ❤️ by <strong>Gaurav Yaduvanshi</strong></p>
+<p align="center">Built with immense passion ❤️ by <strong>Gaurav Yaduvanshi</strong></p>

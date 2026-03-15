@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,28 +15,23 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stripe/stripe-go/v81"
-	"github.com/stripe/stripe-go/v81/checkout/session"
-	"github.com/stripe/stripe-go/v81/customer"
-	"github.com/stripe/stripe-go/v81/subscription"
-	"github.com/stripe/stripe-go/v81/webhook"
 )
 
 func main() {
 	log.Println("╔══════════════════════════════════════╗")
-	log.Println("║    Antisky Billing Service v1.0      ║")
+	log.Println("║    Antisky Billing Service v2.0      ║")
+	log.Println("║    Powered by Razorpay               ║")
 	log.Println("╚══════════════════════════════════════╝")
 
 	port := getEnv("BILLING_PORT", "8087")
 	dbURL := getEnv("DATABASE_URL", "postgres://antisky:antisky_dev_password@localhost:5432/antisky?sslmode=disable")
-	stripeKey := getEnv("STRIPE_SECRET_KEY", "")
-	webhookSecret := getEnv("STRIPE_WEBHOOK_SECRET", "")
+	razorpayKeyID := getEnv("RAZORPAY_KEY_ID", "")
+	razorpayKeySecret := getEnv("RAZORPAY_KEY_SECRET", "")
 
-	if stripeKey != "" {
-		stripe.Key = stripeKey
-		log.Println("✓ Stripe configured")
+	if razorpayKeyID != "" {
+		log.Println("✓ Razorpay configured")
 	} else {
-		log.Println("⚠ Stripe key not set — billing disabled")
+		log.Println("⚠ Razorpay keys not set — billing disabled")
 	}
 
 	ctx := context.Background()
@@ -52,7 +48,7 @@ func main() {
 
 	// Health
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"status":"healthy","service":"billing"}`))
+		w.Write([]byte(`{"status":"healthy","service":"billing","provider":"razorpay"}`))
 	})
 
 	// Plans
@@ -78,59 +74,128 @@ func main() {
 		jsonResponse(w, 200, map[string]interface{}{"plans": plans})
 	})
 
-	// Create Stripe checkout session
+	// Create Razorpay order
 	r.Post("/api/v1/billing/checkout", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			OrgID   string `json:"org_id"`
+			OrgID    string `json:"org_id"`
 			PlanSlug string `json:"plan_slug"`
-			Email   string `json:"email"`
+			Email    string `json:"email"`
+			Amount   int    `json:"amount"` // amount in paise (INR smallest unit)
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 
-		// Get plan price ID
-		var stripePriceID string
-		pool.QueryRow(r.Context(), `SELECT stripe_price_id FROM billing_plans WHERE slug = $1`, req.PlanSlug).Scan(&stripePriceID)
-
-		if stripePriceID == "" {
-			jsonError(w, "plan not found or no Stripe price configured", 400)
+		if razorpayKeyID == "" {
+			jsonError(w, "Razorpay not configured", 500)
 			return
 		}
 
-		// Create or get Stripe customer
-		var stripeCustomerID string
-		pool.QueryRow(r.Context(), `SELECT stripe_customer_id FROM organizations WHERE id = $1`, req.OrgID).Scan(&stripeCustomerID)
-
-		if stripeCustomerID == "" {
-			cust, err := customer.New(&stripe.CustomerParams{
-				Email: stripe.String(req.Email),
-				Params: stripe.Params{Metadata: map[string]string{"org_id": req.OrgID}},
-			})
-			if err != nil {
-				jsonError(w, "stripe error: "+err.Error(), 500)
+		// Get plan from DB
+		var planName string
+		var priceCents int
+		err := pool.QueryRow(r.Context(), `SELECT name, price_cents FROM billing_plans WHERE slug = $1`, req.PlanSlug).Scan(&planName, &priceCents)
+		if err != nil {
+			// Use the provided amount if plan not in DB
+			if req.Amount > 0 {
+				priceCents = req.Amount
+				planName = req.PlanSlug
+			} else {
+				jsonError(w, "plan not found", 400)
 				return
 			}
-			stripeCustomerID = cust.ID
-			pool.Exec(r.Context(), `UPDATE organizations SET stripe_customer_id = $1 WHERE id = $2`, stripeCustomerID, req.OrgID)
 		}
 
-		// Create checkout session
-		params := &stripe.CheckoutSessionParams{
-			Customer: stripe.String(stripeCustomerID),
-			Mode:     stripe.String(string(stripe.CheckoutSessionModeSubscription)),
-			LineItems: []*stripe.CheckoutSessionLineItemParams{
-				{Price: stripe.String(stripePriceID), Quantity: stripe.Int64(1)},
+		// Create Razorpay order via HTTP API
+		orderPayload := map[string]interface{}{
+			"amount":   priceCents, // Razorpay expects amount in paise
+			"currency": "INR",
+			"receipt":  fmt.Sprintf("order_%s_%s", req.OrgID, req.PlanSlug),
+			"notes": map[string]string{
+				"org_id":    req.OrgID,
+				"plan_slug": req.PlanSlug,
+				"email":     req.Email,
 			},
-			SuccessURL: stripe.String(getEnv("PLATFORM_URL", "http://localhost:3000") + "/billing/success"),
-			CancelURL:  stripe.String(getEnv("PLATFORM_URL", "http://localhost:3000") + "/billing/cancel"),
 		}
 
-		s, err := session.New(params)
+		orderJSON, _ := json.Marshal(orderPayload)
+		httpReq, _ := http.NewRequest("POST", "https://api.razorpay.com/v1/orders", bytes.NewBuffer(orderJSON))
+		httpReq.SetBasicAuth(razorpayKeyID, razorpayKeySecret)
+		httpReq.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{}
+		resp, err := client.Do(httpReq)
 		if err != nil {
-			jsonError(w, "checkout error: "+err.Error(), 500)
+			jsonError(w, "razorpay error: "+err.Error(), 500)
+			return
+		}
+		defer resp.Body.Close()
+
+		var orderResp map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&orderResp)
+
+		if resp.StatusCode != 200 {
+			jsonError(w, fmt.Sprintf("razorpay order creation failed: %v", orderResp), resp.StatusCode)
 			return
 		}
 
-		jsonResponse(w, 200, map[string]string{"checkout_url": s.URL, "session_id": s.ID})
+		jsonResponse(w, 200, map[string]interface{}{
+			"order_id": orderResp["id"],
+			"amount":   orderResp["amount"],
+			"currency": orderResp["currency"],
+			"key_id":   razorpayKeyID,
+		})
+	})
+
+	// Verify Razorpay payment
+	r.Post("/api/v1/billing/verify", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			OrderID   string `json:"razorpay_order_id"`
+			PaymentID string `json:"razorpay_payment_id"`
+			Signature string `json:"razorpay_signature"`
+			OrgID     string `json:"org_id"`
+			PlanSlug  string `json:"plan_slug"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		// Verify payment by fetching it from Razorpay
+		httpReq, _ := http.NewRequest("GET", "https://api.razorpay.com/v1/payments/"+req.PaymentID, nil)
+		httpReq.SetBasicAuth(razorpayKeyID, razorpayKeySecret)
+
+		client := &http.Client{}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			jsonError(w, "payment verification failed", 500)
+			return
+		}
+		defer resp.Body.Close()
+
+		var payment map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&payment)
+
+		status, _ := payment["status"].(string)
+		if status != "captured" && status != "authorized" {
+			jsonError(w, "payment not successful: "+status, 400)
+			return
+		}
+
+		// Record payment in DB
+		pool.Exec(r.Context(),
+			`INSERT INTO billing_payments (org_id, razorpay_payment_id, razorpay_order_id, amount, currency, status)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (razorpay_payment_id) DO UPDATE SET status = $6`,
+			req.OrgID, req.PaymentID, req.OrderID, payment["amount"], payment["currency"], status,
+		)
+
+		// Update subscription
+		pool.Exec(r.Context(),
+			`INSERT INTO billing_subscriptions (org_id, plan_id, razorpay_payment_id, status, current_period_start, current_period_end)
+			 SELECT $1, id, $3, 'active', NOW(), NOW() + INTERVAL '30 days'
+			 FROM billing_plans WHERE slug = $2
+			 ON CONFLICT (org_id) DO UPDATE SET plan_id = EXCLUDED.plan_id, status = 'active', razorpay_payment_id = $3, current_period_start = NOW(), current_period_end = NOW() + INTERVAL '30 days', updated_at = NOW()`,
+			req.OrgID, req.PlanSlug, req.PaymentID,
+		)
+
+		log.Printf("💰 Payment verified: %s for org %s", req.PaymentID, req.OrgID)
+		jsonResponse(w, 200, map[string]string{"status": "payment verified", "payment_id": req.PaymentID})
 	})
 
 	// Get subscription info
@@ -203,32 +268,28 @@ func main() {
 		jsonResponse(w, 200, map[string]interface{}{"usage": usage, "period": "30d"})
 	})
 
-	// Stripe webhook
+	// Razorpay webhook
 	r.Post("/api/v1/billing/webhook", func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		sig := r.Header.Get("Stripe-Signature")
 
-		event, err := webhook.ConstructEvent(body, sig, webhookSecret)
-		if err != nil {
-			jsonError(w, "webhook verification failed", 400)
+		var event map[string]interface{}
+		if err := json.Unmarshal(body, &event); err != nil {
+			jsonError(w, "invalid webhook payload", 400)
 			return
 		}
 
-		log.Printf("📧 Stripe webhook: %s", event.Type)
+		eventType, _ := event["event"].(string)
+		log.Printf("📧 Razorpay webhook: %s", eventType)
 
-		switch event.Type {
-		case "customer.subscription.created", "customer.subscription.updated":
-			var sub stripe.Subscription
-			json.Unmarshal(event.Data.Raw, &sub)
-			handleSubscriptionChange(r.Context(), pool, &sub)
-		case "customer.subscription.deleted":
-			var sub stripe.Subscription
-			json.Unmarshal(event.Data.Raw, &sub)
-			handleSubscriptionCancelled(r.Context(), pool, &sub)
-		case "invoice.paid":
-			log.Println("💰 Invoice paid")
-		case "invoice.payment_failed":
-			log.Println("⚠ Payment failed")
+		switch eventType {
+		case "payment.captured":
+			log.Println("💰 Payment captured via webhook")
+		case "payment.failed":
+			log.Println("⚠ Payment failed via webhook")
+		case "subscription.activated":
+			log.Println("✓ Subscription activated")
+		case "subscription.cancelled":
+			log.Println("✗ Subscription cancelled")
 		}
 
 		w.WriteHeader(200)
@@ -237,21 +298,6 @@ func main() {
 	// Cancel subscription
 	r.Post("/api/v1/billing/cancel/{orgID}", func(w http.ResponseWriter, r *http.Request) {
 		orgID := chi.URLParam(r, "orgID")
-		var stripeSubID string
-		pool.QueryRow(r.Context(),
-			`SELECT stripe_subscription_id FROM billing_subscriptions WHERE org_id = $1 AND status = 'active'`, orgID,
-		).Scan(&stripeSubID)
-
-		if stripeSubID == "" {
-			jsonError(w, "no active subscription", 400)
-			return
-		}
-
-		_, err := subscription.Cancel(stripeSubID, nil)
-		if err != nil {
-			jsonError(w, "cancel failed: "+err.Error(), 500)
-			return
-		}
 
 		pool.Exec(r.Context(),
 			`UPDATE billing_subscriptions SET status = 'cancelled', cancel_at = NOW() WHERE org_id = $1 AND status = 'active'`, orgID)
@@ -261,7 +307,7 @@ func main() {
 
 	server := &http.Server{Addr: ":" + port, Handler: r}
 	go func() {
-		log.Printf("💳 Billing service listening on :%s", port)
+		log.Printf("💳 Billing service (Razorpay) listening on :%s", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server failed: %v", err)
 		}
@@ -271,31 +317,6 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	server.Shutdown(context.Background())
-}
-
-func handleSubscriptionChange(ctx context.Context, pool *pgxpool.Pool, sub *stripe.Subscription) {
-	customerID := sub.Customer.ID
-	var orgID string
-	pool.QueryRow(ctx, `SELECT id FROM organizations WHERE stripe_customer_id = $1`, customerID).Scan(&orgID)
-	if orgID == "" {
-		return
-	}
-
-	pool.Exec(ctx,
-		`INSERT INTO billing_subscriptions (org_id, plan_id, stripe_subscription_id, stripe_customer_id, status, current_period_start, current_period_end)
-		 SELECT $1, id, $3, $4, $5, to_timestamp($6), to_timestamp($7)
-		 FROM billing_plans WHERE stripe_price_id = $2
-		 ON CONFLICT (org_id) DO UPDATE SET status = $5, current_period_start = to_timestamp($6), current_period_end = to_timestamp($7), updated_at = NOW()`,
-		orgID, sub.Items.Data[0].Price.ID, sub.ID, customerID, string(sub.Status),
-		sub.CurrentPeriodStart, sub.CurrentPeriodEnd,
-	)
-}
-
-func handleSubscriptionCancelled(ctx context.Context, pool *pgxpool.Pool, sub *stripe.Subscription) {
-	pool.Exec(ctx,
-		`UPDATE billing_subscriptions SET status = 'cancelled', updated_at = NOW() WHERE stripe_subscription_id = $1`,
-		sub.ID,
-	)
 }
 
 func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
