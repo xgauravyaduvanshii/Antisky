@@ -1,0 +1,55 @@
+{
+  "name": "antisky",
+  "displayName": "Antisky — Deploy & Manage",
+  "description": "Deploy, manage, and monitor your projects on Antisky from VS Code",
+  "version": "0.1.0",
+  "publisher": "antisky",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "antisky.deploy", "title": "Antisky: Deploy Current Project" },
+      { "command": "antisky.logs", "title": "Antisky: View Deployment Logs" },
+      { "command": "antisky.status", "title": "Antisky: Deployment Status" },
+      { "command": "antisky.env", "title": "Antisky: Manage Environment Variables" }
+    ],
+    "viewsContainers": {
+      "activitybar": [{
+        "id": "antisky",
+        "title": "Antisky",
+        "icon": "resources/icon.svg"
+      }]
+    },
+    "views": {
+      "antisky": [{
+        "id": "antiskySidebar",
+        "name": "Deployments"
+      }]
+    },
+    "configuration": {
+      "title": "Antisky",
+      "properties": {
+        "antisky.apiUrl": {
+          "type": "string",
+          "default": "https://api.antisky.app",
+          "description": "Antisky API URL"
+        },
+        "antisky.token": {
+          "type": "string",
+          "default": "",
+          "description": "API Token"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.0"
+  }
+}

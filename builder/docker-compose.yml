@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  # Server Node Agent — heartbeat, metrics, commands
+  agent:
+    build:
+      context: ./services/agent
+      dockerfile: Dockerfile
+    container_name: antisky-agent
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    environment:
+      - AGENT_PORT=8090
+      - ADMIN_API_URL=${ADMIN_API_URL}
+      - SERVER_KEY=${SERVER_KEY}
+      - SERVER_ID=${SERVER_ID}
+      - REDIS_URL=${REDIS_URL}
+      - CLUSTER_SECRET=${CLUSTER_SECRET}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    privileged: true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Terminal Proxy — WebSocket SSH bridge
+  terminal-proxy:
+    build:
+      context: ./services/terminal-proxy
+      dockerfile: Dockerfile
+    container_name: antisky-terminal
+    restart: unless-stopped
+    ports:
+      - "8091:8091"
+    environment:
+      - PORT=8091
+      - AGENT_URL=http://agent:8090
+      - SERVER_KEY=${SERVER_KEY}
+      - REDIS_URL=${REDIS_URL}
+    depends_on:
+      agent:
+        condition: service_healthy
+
+  # Health Monitor
+  health-monitor:
+    image: alpine:3.20
+    container_name: antisky-health
+    restart: unless-stopped
+    volumes:
+      - ./health:/health
+    entrypoint: /bin/sh
+    command: ["-c", "while true; do /health/healthcheck.sh; sleep 30; done"]
+    depends_on:
+      - agent

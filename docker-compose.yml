@@ -1,0 +1,164 @@
+services:
+  # ===================================
+  # PostgreSQL Database
+  # ===================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: antisky-postgres
+    environment:
+      POSTGRES_USER: antisky
+      POSTGRES_PASSWORD: antisky_dev_password
+      POSTGRES_DB: antisky
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/control-plane/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antisky"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ===================================
+  # Auth Service (Go) — JWT, OAuth, API Keys
+  # ===================================
+  auth:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    container_name: antisky-auth
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: "8081"
+      DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
+      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      JWT_SECRET: antisky-jwt-secret-k8s-prod-2026-change-this
+      JWT_EXPIRY: 15m
+      REFRESH_TOKEN_EXPIRY: 168h
+      PLATFORM_URL: http://localhost:3000
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITLAB_CLIENT_ID: ${GITLAB_CLIENT_ID:-}
+      GITLAB_CLIENT_SECRET: ${GITLAB_CLIENT_SECRET:-}
+      BITBUCKET_CLIENT_ID: ${BITBUCKET_CLIENT_ID:-}
+      BITBUCKET_CLIENT_SECRET: ${BITBUCKET_CLIENT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ===================================
+  # Control Plane API (Go) — Projects, Deployments, Orgs
+  # ===================================
+  control-plane:
+    build:
+      context: ./services/control-plane
+      dockerfile: Dockerfile
+    container_name: antisky-control-plane
+    ports:
+      - "8082:8080"
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
+      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      AUTH_SERVICE_URL: http://auth:8081
+      GITHUB_WEBHOOK_SECRET: dev-webhook-secret
+      ENCRYPTION_KEY: antisky-aes256-encryption-key32
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ===================================
+  # Build Orchestrator (Go) — Build Queue & Strategy
+  # ===================================
+  build-orchestrator:
+    build:
+      context: ./services/build-orchestrator
+      dockerfile: Dockerfile
+    container_name: antisky-build-orchestrator
+    environment:
+      DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
+      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      CONTROL_PLANE_URL: http://control-plane:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ===================================
+  # Server Manager (Go) — Server Fleet & Admin API
+  # ===================================
+  server-manager:
+    build:
+      context: ./services/server-manager
+      dockerfile: Dockerfile
+    container_name: antisky-server-manager
+    ports:
+      - "8083:8083"
+    environment:
+      SERVER_MANAGER_PORT: "8083"
+      DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
+      REDIS_URL: redis://default:K5d5TrWLlz8UENO8uT3rSMMDDplNhrZ1@redis-14448.crce182.ap-south-1-1.ec2.cloud.redislabs.com:14448
+      CLUSTER_SECRET: antisky-cluster-secret-2026
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ===================================
+  # Billing Service (Go) — Stripe Integration
+  # ===================================
+  billing:
+    build:
+      context: ./services/billing
+      dockerfile: Dockerfile
+    container_name: antisky-billing
+    ports:
+      - "8087:8087"
+    environment:
+      BILLING_PORT: "8087"
+      DATABASE_URL: postgres://antisky:antisky_dev_password@postgres:5432/antisky?sslmode=disable
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PLATFORM_URL: http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ===================================
+  # User Dashboard (Next.js)
+  # ===================================
+  dashboard:
+    build:
+      context: ./apps/dashboard
+      dockerfile: Dockerfile
+    container_name: antisky-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8082
+      NEXT_PUBLIC_AUTH_URL: http://localhost:8081
+    depends_on:
+      - control-plane
+      - auth
+
+  # ===================================
+  # Admin Panel (Next.js)
+  # ===================================
+  admin:
+    build:
+      context: ./apps/admin
+      dockerfile: Dockerfile
+    container_name: antisky-admin
+    ports:
+      - "3001:3001"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8083
+      NEXT_PUBLIC_AUTH_URL: http://localhost:8081
+    depends_on:
+      - server-manager
+      - auth
+
+volumes:
+  postgres_data:

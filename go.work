@@ -1,0 +1,10 @@
+go 1.22
+
+use (
+	./services/auth
+	./services/control-plane
+	./services/build-orchestrator
+	./services/server-manager
+	./services/billing
+	./tools/cli
+)
