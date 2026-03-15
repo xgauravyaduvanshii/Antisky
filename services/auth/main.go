@@ -95,22 +95,23 @@ func main() {
 		fmt.Fprint(w, `{"status":"healthy","service":"auth"}`)
 	})
 
-	// Auth routes (public)
+	// Auth routes
 	r.Route("/auth", func(r chi.Router) {
+		// Public
 		r.Post("/register", authHandler.Register)
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.RefreshToken)
-
-		// OAuth callbacks
 		r.Get("/github/callback", authHandler.GitHubCallback)
-	})
+		r.Get("/oauth/{provider}", handlers.OAuthAuthorize)
+		r.Get("/callback/{provider}", handlers.OAuthCallback)
 
-	// Protected routes
-	r.Route("/auth", func(r chi.Router) {
-		r.Use(middleware.JWTAuth(jwtManager))
-		r.Post("/logout", authHandler.Logout)
-		r.Get("/me", authHandler.GetCurrentUser)
-		r.Put("/me", authHandler.UpdateProfile)
+		// Protected (require JWT)
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.JWTAuth(jwtManager))
+			r.Post("/logout", authHandler.Logout)
+			r.Get("/me", authHandler.GetCurrentUser)
+			r.Put("/me", authHandler.UpdateProfile)
+		})
 	})
 
 	// API Key management (protected)
