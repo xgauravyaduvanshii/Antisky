@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 
@@ -68,7 +69,10 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session
-	ip := r.RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
 	ua := r.UserAgent()
 	session, refreshToken, err := h.sessionStore.Create(r.Context(), user.ID, ip, ua, h.jwtManager.GetRefreshExpiry())
 	if err != nil {
@@ -79,7 +83,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	_ = session // session stored in DB
 
 	// Generate access token
-	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(user.ID, user.Email)
+	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		log.Printf("Error generating token: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to generate token", "INTERNAL_ERROR")
@@ -127,7 +131,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create session
-	ip := r.RemoteAddr
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
 	ua := r.UserAgent()
 	_, refreshToken, err := h.sessionStore.Create(r.Context(), user.ID, ip, ua, h.jwtManager.GetRefreshExpiry())
 	if err != nil {
@@ -137,7 +144,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate access token
-	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(user.ID, user.Email)
+	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		log.Printf("Error generating token: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to generate token", "INTERNAL_ERROR")
@@ -185,7 +192,7 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate new access token
-	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(user.ID, user.Email)
+	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to generate token", "INTERNAL_ERROR")
 		return
@@ -255,6 +262,59 @@ func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, user)
+}
+
+// Impersonate allows an admin to generate an access token for a target user
+func (h *AuthHandler) Impersonate(w http.ResponseWriter, r *http.Request) {
+	// 1. Get current admin user from token
+	adminID, err := middleware.GetUserIDFromContext(r.Context())
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Not authenticated", "UNAUTHORIZED")
+		return
+	}
+
+	adminUser, err := h.userStore.GetByID(r.Context(), adminID)
+	if err != nil || adminUser.Role != "admin" {
+		writeError(w, http.StatusForbidden, "Admin access required", "FORBIDDEN")
+		return
+	}
+
+	// 2. Parse target user ID
+	var req struct {
+		TargetUserID string `json:"target_user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body", "INVALID_BODY")
+		return
+	}
+
+	targetID, err := uuid.Parse(req.TargetUserID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid target_user_id format", "INVALID_ID")
+		return
+	}
+
+	// 3. Fetch target user
+	targetUser, err := h.userStore.GetByID(r.Context(), targetID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Target user not found", "USER_NOT_FOUND")
+		return
+	}
+
+	// 4. Generate access token FOR target user
+	accessToken, expiresIn, err := h.jwtManager.GenerateAccessToken(targetUser.ID, targetUser.Email, targetUser.Role)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to generate token", "INTERNAL_ERROR")
+		return
+	}
+
+	log.Printf("Admin %s impersonified user %s", adminUser.Email, targetUser.Email)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"access_token": accessToken,
+		"expires_in":   expiresIn,
+		"user":         targetUser,
+	})
 }
 
 // GitHubCallback handles GitHub OAuth callback

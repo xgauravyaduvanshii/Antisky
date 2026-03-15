@@ -76,12 +76,16 @@ func main() {
 		r.Post("/{serverID}/command", h.SendCommand)
 		r.Get("/{serverID}/metrics", h.GetServerMetrics)
 		r.Get("/{serverID}/commands", h.GetServerCommands)
+		r.Post("/{serverID}/drain", h.DrainServer)
 	})
+
+	r.Post("/api/v1/admin/cache/flush", h.FlushCache)
 
 	// Admin user management
 	r.Route("/api/v1/admin/users", func(r chi.Router) {
 		r.Get("/", h.ListUsers)
 		r.Get("/{userID}", h.GetUser)
+		r.Delete("/{userID}", h.DeleteUser)
 		r.Post("/{userID}/ban", h.BanUser)
 		r.Post("/{userID}/unban", h.UnbanUser)
 		r.Post("/{userID}/impersonate", h.ImpersonateUser)

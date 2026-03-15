@@ -12,7 +12,9 @@ export default function Dashboard() {
   const [theme, setTheme] = useState('dark');
   const [projects, setProjects] = useState<any[]>([]);
   const [deployments, setDeployments] = useState<any[]>([]);
+  const [domains, setDomains] = useState<any[]>([]);
   const [orgs, setOrgs] = useState<any[]>([]);
+  const [newDomain, setNewDomain] = useState('');
   const router = useRouter();
 
   useEffect(() => {
@@ -35,9 +37,18 @@ export default function Dashboard() {
     // Load Data
     const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8082';
     
-    fetch(`${apiBase}/api/v1/projects`, { headers: { Authorization: `Bearer ${token}` }}).then(r => r.json()).then(data => setProjects(data || [])).catch(() => {});
-    fetch(`${apiBase}/api/v1/orgs`, { headers: { Authorization: `Bearer ${token}` }}).then(r => r.json()).then(data => setOrgs(data || [])).catch(() => {});
+    fetch(`${apiBase}/api/v1/projects`, { headers: { Authorization: `Bearer ${token}` }}).then(r => r.json()).then(data => {
+      setProjects(data.projects || data || []);
+      // Optimistically we could load deployments for the first project
+    }).catch(() => {});
+    fetch(`${apiBase}/api/v1/orgs`, { headers: { Authorization: `Bearer ${token}` }}).then(r => r.json()).then(data => setOrgs(data.orgs || data || [])).catch(() => {});
   }, [router]);
+
+  const addDomain = () => {
+    if (!newDomain) return;
+    setDomains([...domains, { id: Date.now().toString(), name: newDomain, status: 'pending', ssl: 'provisioning' }]);
+    setNewDomain('');
+  };
 
   const changeTheme = (t: string) => {
     setTheme(t);
@@ -47,11 +58,6 @@ export default function Dashboard() {
   const logout = () => { localStorage.clear(); router.push('/login'); };
   const avatar = user?.avatar_url || user?.name?.[0] || 'U';
 
-  const mockDeployments = [
-    { id: 'd1', project: 'my-nextjs-app', status: 'ready', commit: 'fix: auth flow', branch: 'main', duration: '42s', time: '2h ago' },
-    { id: 'd2', project: 'landing-page', status: 'building', commit: 'feat: hero section', branch: 'feat/redesign', duration: '—', time: 'Just now' },
-    { id: 'd3', project: 'api-backend', status: 'ready', commit: 'chore: deps update', branch: 'main', duration: '18s', time: '5h ago' },
-  ];
 
   if (!user) return <div className="auth-page"><div className="auth-bg"/><div style={{ color: 'var(--text-muted)' }}>Loading session...</div></div>;
 
@@ -137,7 +143,7 @@ export default function Dashboard() {
               <div className="stat-grid slide-in">
                 <div className="stat-card"><div className="stat-label">Projects</div><div className="stat-value">{projects.length}</div></div>
                 <div className="stat-card"><div className="stat-label">Organizations</div><div className="stat-value">{orgs.length}</div></div>
-                <div className="stat-card"><div className="stat-label">Deployments</div><div className="stat-value">{mockDeployments.length}</div></div>
+                <div className="stat-card"><div className="stat-label">Deployments</div><div className="stat-value">{deployments.length}</div></div>
                 <div className="stat-card"><div className="stat-label">Active Plan</div><div className="stat-value" style={{ fontSize: 20 }}>Hobby</div></div>
               </div>
 
@@ -145,19 +151,27 @@ export default function Dashboard() {
                 <div><h2 className="page-title">Recent Deployments</h2></div>
               </div>
               
-              <div className="card">
-                {mockDeployments.map(d => (
-                  <div key={d.id} className="deploy-item">
-                    <div className={`deploy-dot ${d.status}`} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{d.project}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.commit} · {d.branch}</div>
+              {deployments.length === 0 ? (
+                <div className="card empty-state" style={{ padding: 40, textAlign: 'center' }}>
+                  <div className="icon" style={{ fontSize: 32, marginBottom: 16 }}>🚀</div>
+                  <h3 style={{ fontSize: 18, marginBottom: 8 }}>No deployments yet</h3>
+                  <p style={{ color: 'var(--text-muted)' }}>Push to your main branch to trigger a build.</p>
+                </div>
+              ) : (
+                <div className="card">
+                  {deployments.map(d => (
+                    <div key={d.id} className="deploy-item">
+                      <div className={`deploy-dot ${d.status}`} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{d.project}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.commit} · {d.branch}</div>
+                      </div>
+                      <span className={`badge badge-${d.status === 'ready' ? 'success' : d.status === 'building' ? 'warning' : 'danger'}`}>{d.status}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 60, textAlign: 'right' }}>{new Date(d.created_at).toLocaleTimeString()}</span>
                     </div>
-                    <span className={`badge badge-${d.status === 'ready' ? 'success' : d.status === 'building' ? 'warning' : 'danger'}`}>{d.status}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', width: 60, textAlign: 'right' }}>{d.time}</span>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -195,6 +209,43 @@ export default function Dashboard() {
                 </div>
               )}
             </>
+          )}
+
+          {/* DOMAINS */}
+          {page === 'domains' && (
+            <div className="slide-in">
+              <div className="page-header">
+                <div><h2 className="page-title">Domains</h2><p className="page-desc">Manage custom domain names for your projects</p></div>
+              </div>
+              
+              <div className="card" style={{ marginBottom: 24 }}>
+                <h4 style={{ fontSize: 16, marginBottom: 12 }}>Add New Domain</h4>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <input className="form-input" style={{ flex: 1 }} placeholder="api.example.com" value={newDomain} onChange={e => setNewDomain(e.target.value)} />
+                  <button className="btn btn-primary btn-sm" onClick={addDomain}>Add Domain</button>
+                </div>
+              </div>
+
+              {domains.length === 0 ? (
+                <div className="card empty-state" style={{ padding: 40, textAlign: 'center' }}>
+                  <div className="icon" style={{ fontSize: 32, marginBottom: 16 }}>🌐</div>
+                  <h3 style={{ fontSize: 18, marginBottom: 8 }}>No domains added</h3>
+                  <p style={{ color: 'var(--text-muted)' }}>Your projects are currently only accessible via antisky.app subdomains.</p>
+                </div>
+              ) : (
+                <div className="card-grid">
+                  {domains.map(d => (
+                    <div key={d.id} className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <strong style={{ fontSize: 16, display: 'block', marginBottom: 4 }}>{d.name}</strong>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Status: {d.status}</div>
+                      </div>
+                      <span className={`badge badge-${d.ssl === 'active' ? 'success' : 'warning'}`}>SSL: {d.ssl}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* PROFILE */}
@@ -236,9 +287,15 @@ export default function Dashboard() {
               <div className="card" style={{ border: '1px solid rgba(239,68,68,0.3)' }}>
                 <h4 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'var(--danger)' }}>Danger Zone</h4>
                 <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 16 }}>Once you delete your account, there is no going back. Please be certain.</p>
-                <button className="btn btn-danger btn-sm" onClick={() => {
-                  if(confirm('Are you sure you want to delete your account?')) {
-                     alert('Demo Mode: Account deletion disabled.');
+                <button className="btn btn-danger btn-sm" onClick={async () => {
+                  if(confirm('Are you absolutely sure you want to delete your account? This action cannot be undone.')) {
+                     const token = localStorage.getItem('token');
+                     await fetch(`${process.env.NEXT_PUBLIC_AUTH_URL || 'http://localhost:8081'}/auth/me`, {
+                       method: 'DELETE',
+                       headers: { Authorization: `Bearer ${token}` }
+                     });
+                     localStorage.clear();
+                     router.push('/signup');
                   }
                 }}>Delete Account</button>
               </div>

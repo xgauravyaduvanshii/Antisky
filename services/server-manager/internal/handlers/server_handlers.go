@@ -219,6 +219,35 @@ func forwardCommandToAgent(server *store.Server, cmd *store.ServerCommand) {
 	io.ReadAll(resp.Body)
 }
 
+// --- Admin Infrastructure Actions ---
+
+func (h *ServerHandler) FlushCache(w http.ResponseWriter, r *http.Request) {
+	if h.rdb == nil {
+		jsonError(w, "redis is not connected", 503)
+		return
+	}
+	if err := h.rdb.FlushAll(r.Context()).Err(); err != nil {
+		jsonError(w, err.Error(), 500)
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"message": "Cache flushed successfully"})
+}
+
+func (h *ServerHandler) DrainServer(w http.ResponseWriter, r *http.Request) {
+	serverID := chi.URLParam(r, "serverID")
+	if serverID == "" {
+		jsonError(w, "missing server ID", 400)
+		return
+	}
+	
+	err := h.store.DecommissionServer(r.Context(), serverID)
+	if err != nil {
+		jsonError(w, err.Error(), 500)
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"message": "Server draining initiated"})
+}
+
 // --- User Management ---
 
 func (h *ServerHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +302,15 @@ func (h *ServerHandler) UnbanUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonResponse(w, 200, map[string]string{"status": "unbanned"})
+}
+
+func (h *ServerHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	userID := chi.URLParam(r, "userID")
+	if err := h.store.DeleteUser(r.Context(), userID); err != nil {
+		jsonError(w, err.Error(), 500)
+		return
+	}
+	jsonResponse(w, 200, map[string]string{"status": "deleted"})
 }
 
 func (h *ServerHandler) ImpersonateUser(w http.ResponseWriter, r *http.Request) {

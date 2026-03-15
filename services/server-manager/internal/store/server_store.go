@@ -336,6 +336,11 @@ func (s *ServerStore) UnbanUser(ctx context.Context, userID string) error {
 	return err
 }
 
+func (s *ServerStore) DeleteUser(ctx context.Context, userID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	return err
+}
+
 func (s *ServerStore) SetUserRole(ctx context.Context, userID, role string) error {
 	_, err := s.pool.Exec(ctx,
 		`UPDATE users SET role = $2, updated_at = NOW() WHERE id = $1`,

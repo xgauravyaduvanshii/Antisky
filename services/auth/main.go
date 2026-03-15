@@ -111,6 +111,7 @@ func main() {
 			r.Post("/logout", authHandler.Logout)
 			r.Get("/me", authHandler.GetCurrentUser)
 			r.Put("/me", authHandler.UpdateProfile)
+			r.Post("/impersonate", authHandler.Impersonate)
 		})
 	})
 

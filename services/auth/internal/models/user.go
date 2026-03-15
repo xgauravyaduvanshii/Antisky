@@ -18,6 +18,7 @@ type User struct {
 	EmailVerified bool       `json:"email_verified"`
 	Provider      string     `json:"provider"`
 	ProviderID    *string    `json:"provider_id,omitempty"`
+	Role          string     `json:"role"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
